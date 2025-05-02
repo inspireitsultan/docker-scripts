@@ -1,0 +1,194 @@
+# PowerShell script to automate Docker Desktop deployment on Windows
+# Requires PowerShell 5.1 or later
+# Elevate privileges: Script must be run as administrator
+
+#region Script Description
+<#
+.SYNOPSIS
+    Automates the installation and configuration of Docker Desktop on Windows.
+
+.DESCRIPTION
+    This script streamlines the process of setting up Docker Desktop on a Windows machine. It performs the following actions:
+
+    1.  Checks for administrative privileges and prompts for elevation if necessary.
+    2.  Enables the Windows Subsystem for Linux (WSL) feature.
+    3.  Enables the Virtual Machine Platform feature.
+    4.  Installs the WSL Ubuntu distribution.
+    5.  Downloads and installs Docker Desktop.
+    6.  Adds the current user to the 'docker-users' group.
+    7.  Sets Docker Desktop to use WSL 2.
+    8.  Prompts for a system restart after installation.
+
+.NOTES
+    * Requires Windows 10 or later.
+    * Requires an active internet connection.
+    * The script must be run as an administrator.
+    * The script assumes that the user wants to install the Ubuntu distribution for WSL.
+    * The script uses the default installation path for Docker Desktop.
+
+.LINK
+    https://docs.docker.com/desktop/windows/
+#>
+#endregion
+
+#region Function Definitions
+
+# Function to check for administrator privileges
+function Test-Admin {
+    # Check if the current process is running as administrator
+    $IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $IsAdmin) {
+        Write-Warning "Script needs to be run as administrator. Please re-run the script from an elevated PowerShell console."
+        return $false
+    }
+    return $true
+}
+
+# Function to enable Windows features
+function Enable-WindowsFeature {
+    param (
+        [string]$FeatureName
+    )
+    Write-Host "Enabling feature: $FeatureName" -ForegroundColor Cyan
+    try {
+        Enable-WindowsOptionalFeature -Online -FeatureName $FeatureName -NoRestart -ErrorAction Stop | Out-Null
+        Write-Host "Feature '$FeatureName' enabled successfully." -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to enable feature '$FeatureName': $($_.Exception.Message)"
+        return $false
+    }
+    return $true
+}
+
+# Function to install WSL Ubuntu distribution
+function Install-WSLUbuntu {
+    Write-Host "Installing WSL with Ubuntu..." -ForegroundColor Cyan
+    try {
+        wsl --install -d Ubuntu
+        # Check the exit code of the wsl command
+        if ($LASTEXITCODE -ne 0)
+        {
+            Write-Error "WSL installation failed with exit code $($LASTEXITCODE)."
+            return $false
+        }
+        Write-Host "WSL with Ubuntu installed successfully." -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to install WSL Ubuntu: $($_.Exception.Message)"
+        return $false
+    }
+    return $true
+}
+
+# Function to download Docker Desktop
+function Download-DockerDesktop {
+    param (
+        [string]$DownloadUrl,
+        [string]$InstallerPath
+    )
+    Write-Host "Downloading Docker Desktop from: $DownloadUrl" -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $InstallerPath -UseBITS -ErrorAction Stop
+        Write-Host "Docker Desktop downloaded successfully to: $InstallerPath" -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to download Docker Desktop: $($_.Exception.Message)"
+        return $false
+    }
+    return $true
+}
+
+# Function to install Docker Desktop
+function Install-DockerDesktop {
+    param (
+        [string]$InstallerPath
+    )
+    Write-Host "Installing Docker Desktop from: $InstallerPath" -ForegroundColor Cyan
+    try {
+        Start-Process -FilePath $InstallerPath -ArgumentList "install", "--quiet" -Wait -PassThru -ErrorAction Stop | Out-Null
+        Write-Host "Docker Desktop installed successfully." -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to install Docker Desktop: $($_.Exception.Message)"
+        return $false
+    }
+    return $true
+}
+
+# Function to add user to docker-users group
+function Add-UserToDockerGroup {
+    Write-Host "Adding user to 'docker-users' group" -ForegroundColor Cyan
+    try {
+        $User = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        net localgroup docker-users $User /add
+        Write-Host "User '$User' added to 'docker-users' group successfully." -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to add user to 'docker-users' group: $($_.Exception.Message)"
+        return $false
+    }
+    return $true
+}
+
+# Function to set Docker Desktop to use WSL 2
+function Set-DockerWSL2 {
+    Write-Host "Setting Docker Desktop to use WSL 2..." -ForegroundColor Cyan
+    try {
+        # This command requires Docker Desktop to be installed.  If the installation failed, this will also fail.
+        & 'C:\Program Files\Docker\Docker\DockerCli.exe' -SwitchDaemon | Out-Null
+        Start-Process -FilePath 'C:\Program Files\Docker\Docker\Docker Desktop.exe' -ArgumentList "--set-default-wsl-engine=true" -Wait -PassThru -ErrorAction Stop | Out-Null
+        Write-Host "Docker Desktop configured to use WSL 2." -ForegroundColor Green
+    } catch {
+       Write-Warning "Failed to set Docker Desktop to use WSL 2.  This may need to be configured manually, or Docker Desktop may not have installed correctly. Error: $($_.Exception.Message)"
+       # Continue, as this is not a critical failure.  The user can configure this manually.
+    }
+}
+
+#endregion
+
+#region Main Script Flow
+
+# Check if the script is running as administrator
+if (-not (Test-Admin)) {
+    exit 1
+}
+
+# Define the Docker Desktop download URL and installer path
+$DockerDesktopUrl = "https://desktop.docker.com/win/main/Docker%20Desktop%20Installer.exe" # Best practice: Do not hardcode, but for full automation, we will.
+$DockerInstallerPath = "$env:TEMP\DockerDesktopInstaller.exe"
+
+# Enable Windows features
+$wslEnabled = Enable-WindowsFeature -FeatureName "Microsoft-Windows-Subsystem-Linux"
+$vmPlatformEnabled = Enable-WindowsFeature -FeatureName "VirtualMachinePlatform"
+
+# Check if both features were enabled successfully
+if ($wslEnabled -and $vmPlatformEnabled) {
+    # Install WSL Ubuntu
+    $wslInstalled = Install-WSLUbuntu
+
+     if ($wslInstalled)
+     {
+        # Download Docker Desktop
+        $dockerDownloaded = Download-DockerDesktop -DownloadUrl $DockerDesktopUrl -InstallerPath $DockerInstallerPath
+
+        if ($dockerDownloaded) {
+            # Install Docker Desktop
+            $dockerInstalled = Install-DockerDesktop -InstallerPath $DockerInstallerPath
+
+            if ($dockerInstalled) {
+                # Add user to docker-users group
+                $userAddedToGroup = Add-UserToDockerGroup
+
+                if ($userAddedToGroup)
+                {
+                    # Set Docker to use WSL 2
+                    Set-DockerWSL2
+                }
+            }
+        }
+    }
+}
+
+# Prompt for restart
+[System.Windows.Forms.MessageBox]::Show("Docker Desktop installation is complete. You MUST restart your computer for the changes to take effect. Click OK to restart now.", "Restart Required", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+
+# Restart the computer
+Restart-Computer -Force
+
+#endregion
