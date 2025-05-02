@@ -1,0 +1,53 @@
+version: '3.8'
+services:
+  app:
+    container_name: nodejs_app
+    image: node:18-alpine  # Using a lightweight Node.js image
+    working_dir: /app
+    volumes:
+      - sultan_node:/app  # Mount the volume to /app
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "4000:4000"
+      - "4001:4001"
+      - "5000:5000"
+      - "5001:5001"
+    environment:
+      - NODE_ENV=development # Set Node environment
+    #  Add a command to keep the container running.  You'll likely
+    #  want to override this in your Dockerfile or when you run the
+    #  container, depending on your application.  For example:
+    #  command: "npm run dev" # Or "node server.js",  "tail -f /dev/null"
+    depends_on:
+      - db
+
+  db:
+    container_name: mariadb_db
+    image: mariadb:10.6.4 # Using a specific MariaDB version
+    volumes:
+      - sultan_db:/var/lib/mysql  # Mount the volume for MariaDB data
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=Welcome@2k20!
+      - MYSQL_DATABASE=mydatabase # You can change this
+      - MYSQL_USER=myuser       # and this
+      - MYSQL_PASSWORD=mypassword # and this.  Use strong passwords in production.
+    ports:
+      - "3306:3306" # Expose MariaDB port
+
+  adminer:
+    container_name: mariadb_adminer
+    image: adminer  # Using the official Adminer image
+    ports:
+      - "8080:8080" # Expose Adminer on port 8080
+    depends_on:
+      - db
+    environment:
+      - ADMINER_DEFAULT_SERVER=db # connect to the 'db' service (MariaDB)
+      # No need to specify user/pass here, Adminer will prompt for them
+      #  or you can enter them in the Adminer UI.
+
+volumes:
+  sultan_node:
+  sultan_db:
